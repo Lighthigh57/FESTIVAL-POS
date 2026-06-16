@@ -1,0 +1,14 @@
+{
+  "name": "festival-pos",
+  "version": "1.0.0",
+  "description": "学校祭POSシステム",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "install-deps": "npm install ws"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "ws": "^8.20.0"
+  }
+}
