@@ -1,13 +1,12 @@
 /**
- * PayPay QRコード生成スクリプト（単一QR版）
+ * PayPay QRコード生成スクリプト（店舗別QR版）
  *
- * 金額に関係なく、常に同じPayPay受け取りURLのQRコードを1枚生成します。
- * 客はQRを読み取った後、PayPayアプリ側で金額を自分で入力して送金します。
+ * data/stores.json に保存されている全出店のPayPay URLを読み込み、
+ * 各出店ごとに data/qr/[storeId].png を生成します。
  *
  * 使い方:
- *   node generate_qr.js "https://qr.paypay.ne.jp/あなたの受け取りURL"
- *
- * 引数を省略した場合、data/stores.json に保存済みのPayPay URL（最初の出店のもの）を使用します。
+ *   node generate_qr.js              → 全出店のQRを一括生成
+ *   node generate_qr.js takoyaki     → 指定した出店IDのみ生成
  */
 
 const QRCode = require('qrcode');
@@ -15,38 +14,7 @@ const fs = require('fs');
 const path = require('path');
 
 const QR_DIR = path.join(__dirname, 'data', 'qr');
-const OUTPUT_FILE = path.join(QR_DIR, 'fixed.png');
-
-let paypayUrl = process.argv[2];
-
-// 引数がなければ stores.json から読む
-if (!paypayUrl) {
-  try {
-    const data = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'stores.json'), 'utf8'));
-    const firstStore = Object.values(data)[0];
-    if (firstStore && firstStore.paypayUrl) {
-      paypayUrl = firstStore.paypayUrl;
-      console.log('stores.json から PayPay URL を取得しました:');
-      console.log('  ' + paypayUrl);
-    }
-  } catch (e) {}
-}
-
-if (!paypayUrl) {
-  console.error('\nPayPay URL が指定されていません。\n');
-  console.error('使い方:');
-  console.error('  node generate_qr.js "https://qr.paypay.ne.jp/あなたの受け取りURL"\n');
-  console.error('または管理画面の「PayPay設定」でURLを保存してから実行してください。\n');
-  process.exit(1);
-}
-
-if (!paypayUrl.startsWith('http')) {
-  console.error('\nURLの形式が正しくありません: ' + paypayUrl + '\n');
-  process.exit(1);
-}
-
-if (!fs.existsSync(path.join(__dirname, 'data'))) fs.mkdirSync(path.join(__dirname, 'data'));
-if (!fs.existsSync(QR_DIR)) fs.mkdirSync(QR_DIR);
+const STORES_FILE = path.join(__dirname, 'data', 'stores.json');
 
 const QR_OPTIONS = {
   width: 300,
@@ -55,18 +23,76 @@ const QR_OPTIONS = {
   errorCorrectionLevel: 'M',
 };
 
-console.log('\nPayPay QRコード生成');
-console.log('━'.repeat(44));
-console.log('URL : ' + paypayUrl);
-console.log('出力: ' + OUTPUT_FILE);
-console.log('━'.repeat(44) + '\n');
+if (!fs.existsSync(path.join(__dirname, 'data'))) fs.mkdirSync(path.join(__dirname, 'data'));
+if (!fs.existsSync(QR_DIR)) fs.mkdirSync(QR_DIR);
 
-QRCode.toFile(OUTPUT_FILE, paypayUrl, QR_OPTIONS)
-  .then(() => {
-    console.log('完了！ QRコードを生成しました。');
-    console.log('客画面でPayPayを選択すると、このQRが表示されます。\n');
-  })
-  .catch(e => {
-    console.error('生成失敗: ' + e.message);
-    process.exit(1);
-  });
+// stores.json 読み込み
+let stores;
+try {
+  stores = JSON.parse(fs.readFileSync(STORES_FILE, 'utf8'));
+} catch (e) {
+  console.error('stores.json が読み込めません: ' + e.message);
+  console.error('先にサーバーを起動して出店を作成してください。');
+  process.exit(1);
+}
+
+// 対象の出店IDを決定
+const targetId = process.argv[2] || null;
+const targets = targetId
+  ? (stores[targetId] ? { [targetId]: stores[targetId] } : null)
+  : stores;
+
+if (!targets) {
+  console.error('出店ID "' + targetId + '" が見つかりません。');
+  console.error('存在する出店: ' + Object.keys(stores).join(', '));
+  process.exit(1);
+}
+
+const entries = Object.entries(targets);
+if (!entries.length) {
+  console.error('出店が登録されていません。管理画面で出店を作成してください。');
+  process.exit(1);
+}
+
+console.log('\nPayPay QRコード生成（店舗別）');
+console.log('━'.repeat(50));
+
+let successCount = 0;
+let skipCount = 0;
+
+async function generateAll() {
+  for (const [storeId, store] of entries) {
+    const url = store.paypayUrl || null;
+    const outputFile = path.join(QR_DIR, storeId + '.png');
+
+    if (!url) {
+      console.log('⚠  ' + storeId + ' (' + store.name + ') : PayPay URL未設定 → スキップ');
+      skipCount++;
+      continue;
+    }
+    if (!url.startsWith('http')) {
+      console.log('⚠  ' + storeId + ' (' + store.name + ') : URLの形式が不正 → スキップ');
+      skipCount++;
+      continue;
+    }
+
+    try {
+      await QRCode.toFile(outputFile, url, QR_OPTIONS);
+      console.log('✓  ' + storeId + ' (' + store.name + ')');
+      console.log('   URL : ' + url);
+      console.log('   出力: ' + outputFile);
+      successCount++;
+    } catch (e) {
+      console.error('✗  ' + storeId + ' : 生成失敗 - ' + e.message);
+    }
+  }
+
+  console.log('━'.repeat(50));
+  console.log('完了: ' + successCount + '件生成, ' + skipCount + '件スキップ');
+  if (skipCount > 0) {
+    console.log('※ スキップされた出店は管理画面の「PayPay設定」でURLを設定してください。');
+  }
+  console.log('');
+}
+
+generateAll();

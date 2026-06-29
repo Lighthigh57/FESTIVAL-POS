@@ -167,6 +167,65 @@
   @keyframes spin{to{transform:rotate(360deg)}}
   #connecting p{font-size:0.92rem;color:var(--text-muted);font-weight:700;}
   ::-webkit-scrollbar{width:3px;} ::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+  /* ═══════════════════════════════════════
+     📱 スマホ対応（幅767px以下）
+     商品グリッドを上・カートを下に縦並び
+  ═══════════════════════════════════════ */
+  @media (max-width: 767px) {
+    header { padding:8px 12px; padding-top:calc(8px + var(--safe-top)); gap:8px; }
+    .logo-img, .logo-placeholder { height:38px; width:38px; font-size:1.5rem; }
+    header h1 { font-size:0.92rem; }
+    .store-badge { display:none; }
+
+    .main { flex-direction: column; }
+
+    .products-area {
+      flex: 1;
+      min-height: 0;
+      padding: 8px;
+      grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+      gap: 7px;
+    }
+    .product-img, .product-img-placeholder { height: 68px; font-size: 2rem; }
+    .product-info { padding: 5px 4px 7px; }
+    .product-name { font-size: 0.75rem; }
+    .product-price { font-size: 0.95rem; }
+    .product-stock { font-size: 0.6rem; }
+    .cart-badge { width:17px; height:17px; font-size:0.6rem; }
+
+    .cart-sidebar {
+      width: 100%;
+      border-left: none;
+      border-top: 2px solid var(--border);
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
+      flex: 0 0 auto;
+      max-height: 38vh;
+      min-height: 120px;
+    }
+    .cart-header { padding: 8px 12px; }
+    .cart-header h2 { font-size: 0.85rem; }
+    .cart-items { padding: 5px 8px; gap: 4px; }
+    .cart-item { padding: 5px 7px; }
+    .cart-item-name { font-size: 0.74rem; }
+    .cart-item-price { font-size: 0.67rem; }
+    .qty-btn { width:22px; height:22px; font-size:0.88rem; }
+    .qty-num { font-size:0.82rem; }
+    .cart-empty { padding: 16px 12px; font-size: 0.78rem; }
+    .cart-empty-icon { font-size: 1.8rem; }
+
+    .cart-footer { padding: 8px 12px; }
+    .total-amount { font-size: 1.3rem; }
+    .total-label { font-size: 0.78rem; }
+    .btn-pay { padding: 12px; font-size: 0.9rem; }
+
+    .modal { width: 96%; padding: 20px 16px; border-radius: 20px; }
+    .modal h2 { font-size: 1.05rem; }
+    .modal-total { font-size: 1.8rem; }
+    .pay-method-btn { padding: 13px 6px; font-size: 0.88rem; }
+    .pay-method-icon { font-size: 1.6rem; }
+    .qr-wrap { width: 150px; height: 150px; }
+  }
+
 </style>
 </head>
 <body>
@@ -462,7 +521,7 @@ function selectPayment(method) {
     fallback.textContent = 'QR読み込み中...';
     warn.style.display = 'none';
 
-    const qrUrl = '/data/qr/fixed.png';
+    const qrUrl = '/data/qr/' + STORE_ID + '.png';
     img.onload = () => {
       fallback.style.display = 'none';
       img.style.display = 'block';

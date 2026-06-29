@@ -2,6 +2,8 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>管理画面 - 学校祭POS</title>
 <style>
@@ -39,6 +41,7 @@
   .link-customer{background:#FFF0E8;color:var(--accent);}
   .link-staff{background:#EEF0FF;color:var(--primary);}
   .link-copy{background:var(--bg);color:var(--text-muted);border:1px solid var(--border);}
+  .link-backyard{background:#F0FFF4;color:#276749;}
 
   .product-editor-table{width:100%;border-collapse:collapse;font-size:0.88rem;}
   .product-editor-table th{text-align:left;padding:7px 8px;font-size:0.74rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);border-bottom:2px solid var(--border);}
@@ -105,7 +108,15 @@
 
   <!-- 出店一覧 -->
   <div class="card">
-    <div class="card-header"><h2>🏪 出店一覧</h2></div>
+    <div class="card-header" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <h2 style="flex:1">🏪 出店一覧</h2>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+        <span style="font-size:0.75rem;color:var(--text-muted);">ソート:</span>
+        <button class="btn btn-ghost btn-sm" onclick="sortStores('id')" id="sort-id">ID順</button>
+        <button class="btn btn-ghost btn-sm" onclick="sortStores('name')" id="sort-name">名前順</button>
+        <button class="btn btn-primary btn-sm" onclick="exportAllUrls()">📥 全URL JSON出力</button>
+      </div>
+    </div>
     <div class="card-body"><div class="store-grid" id="store-grid"><div class="empty-state">出店がありません</div></div></div>
   </div>
 
@@ -237,35 +248,75 @@ function createStore() {
   document.getElementById('new-store-name').value = '';
 }
 
+let sortKey = 'id'; // 'id' or 'name'
+
+function sortStores(key) {
+  sortKey = key;
+  document.getElementById('sort-id').style.fontWeight = key === 'id' ? '900' : '';
+  document.getElementById('sort-name').style.fontWeight = key === 'name' ? '900' : '';
+  renderStoreList();
+}
+
+function exportAllUrls() {
+  if (!storeList.length) { alert('出店がありません'); return; }
+  const base = location.protocol + '//' + location.host;
+  const obj = {};
+  storeList.forEach(function(s) {
+    obj[s.id] = {
+      name: s.name,
+      customer: base + '/customer?store=' + s.id,
+      staff:    base + '/staff?store='    + s.id,
+      backyard: base + '/backyard?store=' + s.id
+    };
+  });
+  const json = JSON.stringify(obj, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'store_urls.json';
+  a.click();
+  toast('📥 store_urls.json をダウンロードしました');
+}
+
 function renderStoreList() {
   const grid = document.getElementById('store-grid');
   if (!storeList.length) { grid.innerHTML = '<div class="empty-state">出店がありません</div>'; return; }
+  const sorted = storeList.slice().sort(function(a, b) {
+    if (sortKey === 'name') return a.name.localeCompare(b.name, 'ja');
+    return a.id.localeCompare(b.id);
+  });
   const THEME_LABELS = { orange:'🟠 オレンジ', red:'🔴 レッド', blue:'🔵 ブルー', green:'🟢 グリーン', purple:'🟣 パープル', dark:'⚫ ダーク' };
-  grid.innerHTML = storeList.map(s => `
-    <div class="store-card">
-      <div class="sc-head">
-        <div class="sc-icon">🏪</div>
-        <div class="sc-title" style="flex:1">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <h3 id="sname-${s.id}">${s.name}</h3>
-            <button class="link-btn" style="background:#EEF0FF;color:#3B4CCA;padding:3px 8px;font-size:0.72rem;" onclick="startRename('${s.id}')">✏️ 編集</button>
-          </div>
-          <div class="sc-id">ID: ${s.id}</div>
-        </div>
-        <button class="link-btn" style="background:#FFF0F0;color:#E53E3E;font-size:0.72rem;" onclick="deleteStore('${s.id}','${s.name}')">🗑️ 削除</button>
-      </div>
-      <div style="margin-bottom:10px;display:flex;align-items:center;gap:8px;">
-        <span style="font-size:0.78rem;color:var(--text-muted);white-space:nowrap;">客画面テーマ:</span>
-        <select class="input" style="flex:1;padding:5px 8px;font-size:0.8rem;" onchange="updateTheme('${s.id}',this.value)">
-          ${Object.entries(THEME_LABELS).map(([k,v])=>`<option value="${k}" ${(s.theme||'orange')===k?'selected':''} >${v}</option>`).join('')}
-        </select>
-      </div>
-      <div class="sc-links">
-        <a class="link-btn link-customer" href="/customer?store=${s.id}" target="_blank">👤 客画面</a>
-        <a class="link-btn link-staff" href="/staff?store=${s.id}" target="_blank">🧑‍💼 店員画面</a>
-        <button class="link-btn link-copy" onclick="copyUrls('${s.id}')">📋 URLコピー</button>
-      </div>
-    </div>`).join('');
+  grid.innerHTML = sorted.map(function(s) {
+    const themeOpts = Object.keys(THEME_LABELS).map(function(k) {
+      const sel = (s.theme || 'orange') === k ? ' selected' : '';
+      return '<option value="' + k + '"' + sel + '>' + THEME_LABELS[k] + '</option>';
+    }).join('');
+    return '<div class="store-card">' +
+      '<div class="sc-head">' +
+        '<div class="sc-icon">🏪</div>' +
+        '<div class="sc-title" style="flex:1">' +
+          '<div style="display:flex;align-items:center;gap:8px;">' +
+            '<h3 id="sname-' + s.id + '">' + s.name + '</h3>' +
+            '<button class="link-btn" style="background:#EEF0FF;color:#3B4CCA;padding:3px 8px;font-size:0.72rem;" onclick="startRename(\'' + s.id + '\')">✏️ 編集</button>' +
+          '</div>' +
+          '<div class="sc-id">ID: ' + s.id + '</div>' +
+        '</div>' +
+        '<button class="link-btn" style="background:#FFF0F0;color:#E53E3E;font-size:0.72rem;" onclick="deleteStore(\'' + s.id + '\',\'' + s.name + '\')">🗑️ 削除</button>' +
+      '</div>' +
+      '<div style="margin-bottom:10px;display:flex;align-items:center;gap:8px;">' +
+        '<span style="font-size:0.78rem;color:var(--text-muted);white-space:nowrap;">客画面テーマ:</span>' +
+        '<select class="input" style="flex:1;padding:5px 8px;font-size:0.8rem;" onchange="updateTheme(\'' + s.id + '\',this.value)">' +
+          themeOpts +
+        '</select>' +
+      '</div>' +
+      '<div class="sc-links">' +
+        '<a class="link-btn link-customer" href="/customer?store=' + s.id + '" target="_blank">👤 客画面</a>' +
+        '<a class="link-btn link-staff" href="/staff?store=' + s.id + '" target="_blank">🧑‍💼 店員画面</a>' +
+        '<a class="link-btn link-backyard" href="/backyard?store=' + s.id + '" target="_blank">🍳 バックヤード</a>' +
+        '<button class="link-btn link-copy" onclick="copyUrls(\'' + s.id + '\')">📋 URLコピー</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
 }
 
 // セレクトを更新するが、現在の選択値を保持する
@@ -280,7 +331,7 @@ function updateSelects() {
 }
 
 function copyUrls(storeId) {
-  const text = '【客画面】 http://' + location.host + '/customer?store=' + storeId + '\n【店員画面】 http://' + location.host + '/staff?store=' + storeId;
+  const text = '【客画面】 http://' + location.host + '/customer?store=' + storeId + '\n【店員画面】 http://' + location.host + '/staff?store=' + storeId + '\n【バックヤード】 http://' + location.host + '/backyard?store=' + storeId;
   navigator.clipboard.writeText(text).then(() => toast('📋 URLをコピーしました'));
 }
 

@@ -129,6 +129,7 @@ const server = http.createServer((req, res) => {
   if (pathname === '/' || pathname === '/admin') filePath = path.join(__dirname, 'public', 'admin.html');
   else if (pathname === '/staff') filePath = path.join(__dirname, 'public', 'staff.html');
   else if (pathname === '/customer') filePath = path.join(__dirname, 'public', 'customer.html');
+  else if (pathname === '/backyard') filePath = path.join(__dirname, 'public', 'backyard.html');
   else if (pathname.startsWith('/data/uploads/')) filePath = path.join(UPLOADS_DIR, path.basename(pathname));
   else if (pathname.startsWith('/data/qr/')) filePath = path.join(__dirname, 'data', 'qr', path.basename(pathname));
   else filePath = path.join(__dirname, 'public', pathname);
@@ -151,6 +152,7 @@ function storePayload(storeId) {
       name: store.name, logo: store.logo, products: store.products,
       totalRevenue: store.totalRevenue, salesCount: store.sales.length, sales: store.sales,
       pendingPayment: store.pendingPayment, paypayUrl: store.paypayUrl || null, theme: store.theme || "orange",
+      numberMode: store.numberMode || false,
     }
   };
 }
@@ -180,7 +182,7 @@ wss.on('connection', (ws) => {
     switch (type) {
       case 'REGISTER': {
         const role = msg.role;
-        if (!stores[storeId] && role !== 'admin' && role !== 'admin_product') {
+        if (!stores[storeId] && role !== 'admin' && role !== 'admin_product' && role !== 'backyard') {
           ws.send(JSON.stringify({ type: 'ERROR', message: '出店が存在しません' })); return;
         }
         clients.set(ws, { type: role, storeId: storeId || null });
@@ -228,7 +230,7 @@ wss.on('connection', (ws) => {
         const store = stores[storeId]; if (!store || !store.pendingPayment) return;
         const { items, total, method } = store.pendingPayment;
         for (const item of items) { const p = store.products.find(p => p.id === item.id); if (p) p.stock = Math.max(0, p.stock - item.qty); }
-        store.sales.push({ items, total, method, time: new Date().toISOString() });
+        store.sales.push({ items, total, method, time: new Date().toISOString(), delivered: false });
         store.totalRevenue += total; store.pendingPayment = null;
         saveAndBroadcast(storeId); break;
       }
@@ -280,6 +282,18 @@ wss.on('connection', (ws) => {
             if (ci && ci.storeId === storeId) c.send(JSON.stringify({ type: 'STORE_DELETED' }));
           }
         }); break;
+      }
+      case 'TOGGLE_DELIVERED': {
+        const store = stores[storeId]; if (!store) return;
+        const idx = msg.saleIndex;
+        if (idx < 0 || idx >= store.sales.length) return;
+        store.sales[idx].delivered = !store.sales[idx].delivered;
+        saveAndBroadcast(storeId); break;
+      }
+      case 'SET_NUMBER_MODE': {
+        if (!stores[storeId]) return;
+        stores[storeId].numberMode = !!msg.numberMode;
+        saveAndBroadcast(storeId); break;
       }
       case 'UPDATE_THEME': {
         if (!stores[storeId]) return;
