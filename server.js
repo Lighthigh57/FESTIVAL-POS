@@ -8,6 +8,22 @@ const PORT = 3000;
 const DATA_FILE = path.join(__dirname, 'data', 'stores.json');
 const UPLOADS_DIR = path.join(__dirname, 'data', 'uploads');
 const QR_DIR = path.join(__dirname, 'data', 'qr');
+const CONFIG_FILE = path.join(__dirname, 'config.json');
+const MASTER_FILE = path.join(__dirname, 'data', 'stores_master.json');
+
+// config.json から管理画面パスワードを読み込み（なければデフォルト作成）
+let CONFIG = { adminPassword: 'festival2026' };
+try {
+  if (fs.existsSync(CONFIG_FILE)) {
+    CONFIG = Object.assign(CONFIG, JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')));
+  } else {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(CONFIG, null, 2), 'utf8');
+    console.log('⚙️  config.json を作成しました（初期パスワード: ' + CONFIG.adminPassword + '）');
+  }
+} catch (e) {
+  console.error('config.json 読み込みエラー:', e.message);
+}
+const ADMIN_PASSWORD = CONFIG.adminPassword;
 
 if (!fs.existsSync(path.join(__dirname, 'data'))) fs.mkdirSync(path.join(__dirname, 'data'));
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
@@ -32,6 +48,11 @@ function loadData() {
           stock2: p.stock2 !== undefined ? p.stock2 : (p.stock || 0),
           active1: p.active1 !== undefined ? p.active1 : true,
           active2: p.active2 !== undefined ? p.active2 : true,
+          overStock: p.overStock || false,
+          overCount1: p.overCount1 || 0,
+          overCount2: p.overCount2 || 0,
+          sold1: p.sold1 || 0,
+          sold2: p.sold2 || 0,
         }));
         // 旧形式sales→sales1の移行
         if (stores[id].sales && !stores[id].sales1) {
@@ -151,6 +172,7 @@ const server = http.createServer((req, res) => {
 
   let filePath;
   if (pathname === '/' || pathname === '/admin') filePath = path.join(__dirname, 'public', 'admin.html');
+  else if (pathname === '/admin/log') filePath = path.join(__dirname, 'public', 'admin_log.html');
   else if (pathname === '/staff') filePath = path.join(__dirname, 'public', 'staff.html');
   else if (pathname === '/customer') filePath = path.join(__dirname, 'public', 'customer.html');
   else if (pathname === '/backyard') filePath = path.join(__dirname, 'public', 'backyard.html');
@@ -184,8 +206,10 @@ function storePayload(storeId) {
     .map(p => ({
       id: p.id, name: p.name, price: p.price, image: p.image,
       stock: day === 1 ? (p.stock1 || 0) : (p.stock2 || 0),
-      // 管理画面用に両日の情報も渡す
       stock1: p.stock1, stock2: p.stock2, active1: p.active1, active2: p.active2,
+      overStock: p.overStock || false,
+      overCount: day === 1 ? (p.overCount1 || 0) : (p.overCount2 || 0),
+      sold: day === 1 ? (p.sold1 || 0) : (p.sold2 || 0),
     }));
   const sales    = day === 1 ? (store.sales1 || [])         : (store.sales2 || []);
   const revenue  = day === 1 ? (store.totalRevenue1 || 0)   : (store.totalRevenue2 || 0);
@@ -195,6 +219,7 @@ function storePayload(storeId) {
       totalRevenue: revenue, salesCount: sales.length, sales,
       pendingPayment: store.pendingPayment, paypayUrl: store.paypayUrl || null, theme: store.theme || "orange",
       numberMode: store.numberMode || false, currentDay: day,
+      countUpMode: store.countUpMode || false,
     }
   };
 }
@@ -203,6 +228,7 @@ function broadcastStoreState(storeId) {
   const payload = storePayload(storeId);
   if (!payload) return;
   const msg = JSON.stringify(payload);
+  console.log(msg);
   wss.clients.forEach(ws => {
     if (ws.readyState === WebSocket.OPEN) {
       const c = clients.get(ws);
@@ -233,6 +259,10 @@ wss.on('connection', (ws) => {
         if (!stores[storeId] && role !== 'admin' && role !== 'admin_product' && role !== 'backyard') {
           ws.send(JSON.stringify({ type: 'ERROR', message: '出店が存在しません' })); return;
         }
+        // 管理画面ロールはパスワード認証が必要
+        if ((role === 'admin' || role === 'admin_product') && msg.password !== ADMIN_PASSWORD) {
+          ws.send(JSON.stringify({ type: 'AUTH_FAILED', message: 'パスワードが違います' })); return;
+        }
         clients.set(ws, { type: role, storeId: storeId || null });
         ws.send(JSON.stringify({ type: 'REGISTERED', role, storeId, currentDay }));
         if (storeId && stores[storeId]) ws.send(JSON.stringify(storePayload(storeId)));
@@ -257,6 +287,11 @@ wss.on('connection', (ws) => {
           stock2: p.stock2 !== undefined ? p.stock2 : (p.stock || 0),
           active1: p.active1 !== undefined ? p.active1 : true,
           active2: p.active2 !== undefined ? p.active2 : true,
+          overStock: p.overStock || false,
+          overCount1: p.overCount1 || 0,
+          overCount2: p.overCount2 || 0,
+          sold1: p.sold1 || 0,
+          sold2: p.sold2 || 0,
         }));
         saveAndBroadcast(storeId); break;
       }
@@ -277,7 +312,9 @@ wss.on('connection', (ws) => {
         for (const item of items) {
           const p = store.products.find(p => p.id === item.id);
           const stock = p ? (currentDay === 1 ? (p.stock1||0) : (p.stock2||0)) : 0;
-          if (!p || stock < item.qty) { ws.send(JSON.stringify({ type: 'ERROR', message: item.name + 'の在庫が不足しています' })); return; }
+          const isOver = p && p.overStock;
+          const isCU = stores[storeId] && stores[storeId].countUpMode;
+          if (!p || (!isOver && !isCU && stock < item.qty)) { ws.send(JSON.stringify({ type: 'ERROR', message: item.name + 'の在庫が不足しています' })); return; }
         }
         store.pendingPayment = { items, total, method: msg.method };
         saveAndBroadcast(storeId); break;
@@ -288,8 +325,18 @@ wss.on('connection', (ws) => {
         for (const item of items) {
           const p = store.products.find(p => p.id === item.id);
           if (p) {
-            if (currentDay === 1) p.stock1 = Math.max(0, (p.stock1||0) - item.qty);
-            else                  p.stock2 = Math.max(0, (p.stock2||0) - item.qty);
+            const store2 = stores[storeId];
+            if (store2 && store2.countUpMode) {
+              // カウントアップモード: sold数をインクリメント（stock減算なし）
+              if (currentDay === 1) p.sold1 = (p.sold1||0) + item.qty;
+              else                  p.sold2 = (p.sold2||0) + item.qty;
+            } else if (p.overStock) {
+              if (currentDay === 1) p.overCount1 = (p.overCount1||0) + item.qty;
+              else                  p.overCount2 = (p.overCount2||0) + item.qty;
+            } else {
+              if (currentDay === 1) p.stock1 = Math.max(0, (p.stock1||0) - item.qty);
+              else                  p.stock2 = Math.max(0, (p.stock2||0) - item.qty);
+            }
           }
         }
         if (currentDay === 1) {
@@ -315,6 +362,26 @@ wss.on('connection', (ws) => {
         store.pendingPayment = null;
         saveAndBroadcast(storeId); break;
       }
+      case 'GET_ALL_SALES': {
+        // 全出店の売上ログを一括返却（ログページ用）
+        const reqDay = (msg.day === 1 || msg.day === 2) ? msg.day : currentDay;
+        const allSales = [];
+        for (const [sid, store] of Object.entries(stores)) {
+          const sales = reqDay === 1 ? (store.sales1 || []) : (store.sales2 || []);
+          sales.forEach((sale, idx) => {
+            allSales.push({
+              storeId: sid,
+              storeName: store.name,
+              saleIndex: idx,
+              ...sale,
+            });
+          });
+        }
+        // 時刻順にソート
+        allSales.sort((a, b) => new Date(a.time) - new Date(b.time));
+        ws.send(JSON.stringify({ type: 'ALL_SALES_DATA', sales: allSales, currentDay: reqDay, storeList: Object.keys(stores).map(id => ({ id, name: stores[id].name })) }));
+        break;
+      }
       case 'GET_SALES': {
         const store = stores[storeId]; if (!store) return;
         // adminから日指定がある場合はその日を、なければcurrentDayを使う
@@ -332,8 +399,13 @@ wss.on('connection', (ws) => {
         for (const item of sale.items) {
           const p = store.products.find(p => p.id === item.id);
           if (p) {
-            if (currentDay === 1) p.stock1 = (p.stock1||0) + item.qty;
-            else                  p.stock2 = (p.stock2||0) + item.qty;
+            if (p.overStock) {
+              if (currentDay === 1) p.overCount1 = Math.max(0, (p.overCount1||0) - item.qty);
+              else                  p.overCount2 = Math.max(0, (p.overCount2||0) - item.qty);
+            } else {
+              if (currentDay === 1) p.stock1 = (p.stock1||0) + item.qty;
+              else                  p.stock2 = (p.stock2||0) + item.qty;
+            }
           }
         }
         if (currentDay === 1) { store.totalRevenue1 = (store.totalRevenue1||0) - sale.total; store.sales1.splice(idx, 1); }
@@ -360,6 +432,52 @@ wss.on('connection', (ws) => {
           }
         }); break;
       }
+      case 'RESET_STOCK': {
+        const reqDay = msg.day; // 1, 2, or 'both'
+        const targetId = msg.storeId;
+        const targets = targetId ? [targetId] : Object.keys(stores);
+        // masterから初期在庫を読み込む
+        let master = {};
+        try { master = JSON.parse(require('fs').readFileSync(MASTER_FILE, 'utf8')); } catch(e) { console.error('master読込失敗:', e.message); }
+        for (const sid of targets) {
+          const store = stores[sid];
+          if (!store) continue;
+          const masterProds = {};
+          if (master[sid]) master[sid].products.forEach(p => masterProds[p.id] = p);
+          store.products = store.products.map(p => {
+            const mp = masterProds[p.id];
+            const np = {...p};
+            if (reqDay === 1 || reqDay === 'both') {
+              np.stock1 = mp ? mp.stock1 : p.stock1;
+              np.active1 = mp ? mp.active1 : p.active1;
+              np.overCount1 = 0;
+            }
+            if (reqDay === 2 || reqDay === 'both') {
+              np.stock2 = mp ? mp.stock2 : p.stock2;
+              np.active2 = mp ? mp.active2 : p.active2;
+              np.overCount2 = 0;
+            }
+            np.overStock = false;
+            return np;
+          });
+          if (reqDay === 1 || reqDay === 'both') { store.sales1 = []; store.totalRevenue1 = 0; }
+          if (reqDay === 2 || reqDay === 'both') { store.sales2 = []; store.totalRevenue2 = 0; }
+          store.pendingPayment = null;
+          broadcastStoreState(sid);
+        }
+        saveData();
+        ws.send(JSON.stringify({ type: 'RESET_STOCK_DONE', day: reqDay, storeId: targetId }));
+        break;
+      }
+      case 'TOGGLE_OVER_STOCK': {
+        const store = stores[storeId]; if (!store) return;
+        const pid = msg.productId;
+        const p = store.products.find(p => p.id === pid);
+        if (!p) return;
+        p.overStock = !p.overStock;
+        // 突破モードOFF時はoverCountをリセットしない（集計のため保持）
+        saveAndBroadcast(storeId); break;
+      }
       case 'TOGGLE_DELIVERED': {
         const store = stores[storeId]; if (!store) return;
         const idx = msg.saleIndex;
@@ -374,6 +492,15 @@ wss.on('connection', (ws) => {
         saveData();
         broadcastDayState();
         break;
+      }
+      case 'SET_COUNT_UP_MODE': {
+        if (!stores[storeId]) return;
+        stores[storeId].countUpMode = !!msg.countUpMode;
+        // カウントアップモードOFF時はsold数をリセット
+        if (!msg.countUpMode) {
+          stores[storeId].products.forEach(p => { p.sold1 = 0; p.sold2 = 0; });
+        }
+        saveAndBroadcast(storeId); break;
       }
       case 'SET_NUMBER_MODE': {
         if (!stores[storeId]) return;

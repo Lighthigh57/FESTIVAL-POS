@@ -342,7 +342,6 @@ function connect() {
 }
 
 function updateState(store) {
-  currentStore = store
   document.getElementById('store-name').textContent = store.name;
   document.getElementById('store-badge').textContent = STORE_ID;
   paypayUrl = store.paypayUrl || null;
@@ -479,7 +478,7 @@ function renderProducts() {
     const els = productCardEls[p.id];
     if (!els) return;
     const isOver = !!p.overStock;
-    const isCU = !!currentStore.countUpMode;
+    const isCU = !!store.countUpMode;
     const inCart = cart[p.id] && cart[p.id].qty > 0;
     const qty = inCart ? cart[p.id].qty : 0;
     const oos = !isOver && !isCU && p.stock <= 0;

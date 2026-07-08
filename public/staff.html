@@ -40,8 +40,38 @@
   .stock-price{font-size:0.72rem;color:var(--text-muted);}
   .stock-count{font-family:'Oswald',sans-serif;font-size:1.2rem;color:var(--text);}
   .stock-count.low{color:var(--primary);}
+  .stock-count.over{color:var(--accent);font-size:0.75rem;font-weight:700;}
+  .btn-overstock{
+    width:100%;margin-top:4px;padding:5px 8px;
+    background:#F5A62322;border:1px dashed var(--accent);border-radius:8px;
+    color:var(--accent);font-size:0.68rem;font-weight:700;font-family:inherit;
+    cursor:pointer;transition:all 0.15s;
+  }
+  .btn-overstock:hover{background:#F5A62344;}
+  .btn-overstock.active{background:var(--accent);color:#000;}
 
   /* ── モード切替ボタン ── */
+  /* カウントアップモードボタン */
+  .mode-btn-cu{
+    margin-top:4px;flex-shrink:0;
+    background:var(--bg);border:2px solid var(--border);border-radius:12px;
+    padding:8px 12px;cursor:pointer;font-family:inherit;font-size:0.75rem;font-weight:700;
+    color:var(--text-muted);display:flex;align-items:center;justify-content:center;gap:6px;
+    transition:all 0.18s;
+  }
+  .mode-btn-cu:hover{border-color:#06D6A0;color:#06D6A0;}
+  .mode-btn-cu.active{background:#06D6A022;border-color:#06D6A0;color:#06D6A0;}
+  .mode-btn-cu .mode-dot{width:7px;height:7px;border-radius:50%;background:var(--text-muted);flex-shrink:0;}
+  .mode-btn-cu.active .mode-dot{background:#06D6A0;}
+
+  /* 設定パネル */
+  .settings-panel{background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:4px;}
+  .settings-panel label{font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;}
+  .theme-btns{display:flex;gap:4px;flex-wrap:wrap;}
+  .theme-dot{width:22px;height:22px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all 0.15s;}
+  .theme-dot.selected{border-color:white;box-shadow:0 0 0 2px var(--accent);}
+  .logo-upload-btn{padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:0.68rem;font-family:inherit;cursor:pointer;color:var(--text);width:100%;}
+
   .mode-btn{
     margin-top:auto;
     flex-shrink:0;
@@ -239,6 +269,26 @@
       <h3>在庫状況</h3>
       <div class="stock-list" id="stock-list"></div>
     </div>
+    <!-- 設定パネル -->
+    <div class="settings-panel" id="settings-panel" style="display:none;">
+      <label>テーマカラー</label>
+      <div class="theme-btns" id="theme-btns"></div>
+      <label style="margin-top:2px;">ロゴ画像</label>
+      <input type="file" id="logo-file-input" accept="image/*" style="display:none;" onchange="uploadLogo(this)">
+      <button class="logo-upload-btn" onclick="document.getElementById('logo-file-input').click()">🖼️ ロゴ画像を変更</button>
+    </div>
+
+    <!-- カウントアップモードボタン -->
+    <button class="mode-btn-cu" id="mode-btn-cu" onclick="toggleCountUpMode()">
+      <span class="mode-dot"></span>
+      <span id="cu-label">カウントアップモード</span>
+    </button>
+
+    <!-- 設定ボタン -->
+    <button class="mode-btn" id="settings-toggle-btn" onclick="toggleSettings()" style="margin-top:4px;">
+      ⚙️ 外観設定
+    </button>
+
     <!-- ② モード切替ボタン -->
     <button class="mode-btn" id="mode-btn" onclick="toggleMode()">
       <span class="mode-dot"></span>
@@ -319,6 +369,10 @@ function updateDayBadge(day) {
   el.className = 'day-badge-hdr ' + (day === 2 ? 'day2' : 'day1');
 }
 
+function toggleOverStock(productId) {
+  ws.send(JSON.stringify({ type:'TOGGLE_OVER_STOCK', storeId:STORE_ID, productId }));
+}
+
 function connect() {
   ws = new WebSocket(WS_URL);
   ws.onopen = () => ws.send(JSON.stringify({ type:'REGISTER', role:'staff', storeId:STORE_ID }));
@@ -344,16 +398,35 @@ function updateState(store) {
 
   // numberModeをサーバー側の値に同期
   numberMode = !!store.numberMode;
+  countUpMode = !!store.countUpMode;
+  currentTheme = store.theme || 'orange';
+  // カウントアップモードボタン更新
+  const btnCu = document.getElementById('mode-btn-cu');
+  if (btnCu) {
+    document.getElementById('cu-label').textContent = countUpMode ? 'カウントアップ中（解除）' : 'カウントアップモード';
+    btnCu.classList.toggle('active', countUpMode);
+  }
+  renderThemeBtns();
   const btn = document.getElementById('mode-btn');
   document.getElementById('mode-label').textContent = numberMode ? '番号札モード' : '通常モード';
   btn.classList.toggle('active', numberMode);
 
   // 在庫
-  document.getElementById('stock-list').innerHTML = store.products.map(p => `
-    <div class="stock-item">
-      <div><div class="stock-name">${esc(p.name)}</div><div class="stock-price">¥${p.price}</div></div>
-      <div class="stock-count${p.stock <= 5 ? ' low' : ''}">${p.stock}</div>
-    </div>`).join('');
+  document.getElementById('stock-list').innerHTML = store.products.map(p => {
+    const isOver = p.overStock;
+    const showOver = isOver || p.stock <= 0;
+    const countClass = isOver ? ' over' : (p.stock <= 5 ? ' low' : '');
+    const countText = isOver ? '突破中+' + (p.overCount||0) : p.stock;
+    const overBtn = (p.stock <= 0 || isOver) ?
+      '<button class="btn-overstock' + (isOver ? ' active' : '') + '" onclick="toggleOverStock(' + p.id + ')">' +
+      (isOver ? '⚡ 突破モード中（解除）' : '⚡ 上限突破モード') + '</button>' : '';
+    return '<div class="stock-item" style="flex-direction:column;align-items:stretch;gap:4px;">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;">' +
+        '<div><div class="stock-name">' + esc(p.name) + '</div><div class="stock-price">¥' + p.price + '</div></div>' +
+        '<div class="stock-count' + countClass + '">' + countText + '</div>' +
+      '</div>' + overBtn +
+    '</div>';
+  }).join('');
 
   // 決済待ち
   renderPendingArea(store.pendingPayment);
@@ -366,6 +439,59 @@ function updateState(store) {
 // ② モード切替
 function toggleMode() {
   ws.send(JSON.stringify({ type:'SET_NUMBER_MODE', storeId:STORE_ID, numberMode:!numberMode }));
+}
+
+// カウントアップモード切替
+function toggleCountUpMode() {
+  if (!countUpMode) {
+    // オンにする時だけ警告
+    if (!confirm(
+      'カウントアップモードに切り替えますか？\n\n' +
+      '・在庫数は減算されず、売上数をカウントアップします\n' +
+      '・目標数を超えると客画面に突破バナーが表示されます\n' +
+      '・モードを解除するとカウントはリセットされます'
+    )) return;
+  }
+  ws.send(JSON.stringify({ type:'SET_COUNT_UP_MODE', storeId:STORE_ID, countUpMode:!countUpMode }));
+}
+
+// 設定パネル開閉
+function toggleSettings() {
+  const panel = document.getElementById('settings-panel');
+  panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+}
+
+// テーマ色定義
+const THEMES = {
+  orange:'#E94560', red:'#E53E3E', blue:'#3B82F6',
+  green:'#10B981', purple:'#8B5CF6', dark:'#374151'
+};
+
+function renderThemeBtns() {
+  const wrap = document.getElementById('theme-btns');
+  if (!wrap) return;
+  wrap.innerHTML = Object.entries(THEMES).map(function(e) {
+    var key = e[0], color = e[1];
+    return '<div class="theme-dot' + (currentTheme === key ? ' selected' : '') + '" style="background:' + color + ';" onclick="setTheme(\'' + key + '\')" title="' + key + '"></div>';
+  }).join('');
+}
+
+function setTheme(theme) {
+  ws.send(JSON.stringify({ type:'UPDATE_THEME', storeId:STORE_ID, theme }));
+}
+
+// ロゴアップロード
+function uploadLogo(input) {
+  if (!input.files[0]) return;
+  const file = input.files[0];
+  const formData = new FormData();
+  formData.append('storeId', STORE_ID);
+  formData.append('field', 'logo');
+  formData.append('file', file);
+  fetch('/api/upload', { method:'POST', body:formData })
+    .then(r => r.json())
+    .then(d => { if (d.url) ws.send(JSON.stringify({ type:'UPDATE_LOGO', storeId:STORE_ID, logo: d.url })); })
+    .catch(e => alert('アップロード失敗: ' + e.message));
 }
 
 // ── 決済待ちパネル ────────────────────────────────────────────
