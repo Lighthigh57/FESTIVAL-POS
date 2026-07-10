@@ -303,7 +303,8 @@ header h1 {
     text-align: center;
     border-bottom: 2px solid var(--border);
     white-space: normal;
-    overflow: visible;
+    overflow: hidden;
+    word-break: break-all;
 }
 
 .log-table th.col-fixed {
