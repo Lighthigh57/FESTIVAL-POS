@@ -4,3 +4,4 @@ data/
 *.bat
 *.exe
 *.csv
+config.json
