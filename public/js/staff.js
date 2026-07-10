@@ -75,11 +75,28 @@ function updateState(store) {
     document.getElementById('mode-label').textContent = numberMode ? '番号札モード' : '通常モード';
     btn.classList.toggle('active', numberMode);
 
-    if(!!countUpMode){
-        document.getElementById('stock-section-title').innerHTML = '個別販売数'
+
+    // document.getElementById('stock-section-title').innerHTML = '個別販売数'
+    // if(!!countUpMode){
+    //     document.getElementById('stock-section-title').innerHTML = '個別販売数'
+    // } else {
+    //     document.getElementById('stock-section-title').innerHTML = '在庫残り'
+    // }
+    const stockSectionTitle = document.getElementById('stock-section-title');
+    if (stockSectionTitle) {
+    if (countUpMode) {
+        stockSectionTitle.innerHTML = '個別販売数';
     } else {
-        document.getElementById('stock-section-title').innerHTML = '在庫残り'
+        stockSectionTitle.innerHTML = '在庫残り';
     }
+}
+    
+    // 決済待ち
+    renderPendingArea(store.pendingPayment);
+
+    // 売上ログ
+    salesData = store.sales || [];
+    renderLog();
 
     // 在庫
     document.getElementById('stock-list').innerHTML = store.products.map(p => {
@@ -98,12 +115,6 @@ function updateState(store) {
             '</div>';
     }).join('');
 
-    // 決済待ち
-    renderPendingArea(store.pendingPayment);
-
-    // 売上ログ
-    salesData = store.sales || [];
-    renderLog();
 }
 
 // ② モード切替
